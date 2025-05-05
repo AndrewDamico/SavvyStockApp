@@ -33,23 +33,31 @@ elif profile == "Exploratory (Broader Risk Spread)":
 else:
     ticker_input = st.text_input("Enter stock tickers (comma-separated)", value="AAPL, MSFT, GOOG")
     tickers = [x.strip().upper() for x in ticker_input.split(",") if x.strip()]
+    # Provide placeholder numeric values to avoid table error
+    default_start = 100
+    default_expected = 110
     stock_data = {
-        "Stock": tickers,
-        "Start Price": [np.nan] * len(tickers),
-        "Expected Price": [np.nan] * len(tickers),
-        "Variance": [np.nan] * len(tickers),
+        "Stock": tickers if tickers else ["TICK1", "TICK2", "TICK3"],
+        "Start Price": [default_start] * max(1, len(tickers)),
+        "Expected Price": [default_expected] * max(1, len(tickers)),
+        "Variance": [0.05] * max(1, len(tickers)),  # placeholder; will auto-compute
     }
     editable = True
     add_rows = True
 
 initial_data = pd.DataFrame(stock_data)
-st.subheader("Stock Parameters")
+st.subheader("Stock Parameters (Edit Expected Return and Risk)")
 stock_df = st.data_editor(initial_data, num_rows="dynamic" if add_rows else "fixed", use_container_width=True)
 stock_df = stock_df.dropna()
 
 stock_df["Start Price"] = pd.to_numeric(stock_df["Start Price"], errors="coerce")
 stock_df["Expected Price"] = pd.to_numeric(stock_df["Expected Price"], errors="coerce")
-stock_df["Variance"] = pd.to_numeric(stock_df["Variance"], errors="coerce")
+
+# Automatically estimate variance based on 3% volatility by default if not provided
+if "Variance" not in stock_df or stock_df["Variance"].isnull().any():
+    returns = ((stock_df["Expected Price"] - stock_df["Start Price"]) / stock_df["Start Price"])
+    est_variance = np.maximum(0.01, (returns.std() ** 2))  # ensure nonzero
+    stock_df["Variance"] = stock_df["Variance"].fillna(est_variance)
 
 expected_returns = ((stock_df["Expected Price"] - stock_df["Start Price"]) / stock_df["Start Price"]).to_numpy()
 asset_names = stock_df["Stock"].tolist()
