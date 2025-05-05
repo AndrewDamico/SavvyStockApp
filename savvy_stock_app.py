@@ -3,15 +3,12 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import cvxpy as cp
-import yfinance as yf
-from sklearn.linear_model import LinearRegression
-from datetime import datetime, timedelta
 
 st.set_page_config(page_title="Savvy Stock Portfolio Optimizer", layout="wide")
 st.title("📈 Savvy Stock Portfolio Optimizer")
 
 st.sidebar.header("Data Profile")
-profile = st.sidebar.radio("Choose Stock Data Profile", ["Original (Case-Based)", "Exploratory (Broader Risk Spread)", "Use My Own Data (Live Prediction)"])
+profile = st.sidebar.radio("Choose Stock Data Profile", ["Original (Case-Based)", "Exploratory (Broader Risk Spread)", "Use My Own Data"])
 
 if profile == "Original (Case-Based)":
     stock_data = {
@@ -36,58 +33,15 @@ elif profile == "Exploratory (Broader Risk Spread)":
 else:
     ticker_input = st.text_input("Enter stock tickers (comma-separated)", value="AAPL, MSFT, GOOG")
     tickers = [x.strip().upper() for x in ticker_input.split(",") if x.strip()]
-
-    # Ensure persistent storage
-    if "stock_data_live" not in st.session_state:
-        st.session_state["stock_data_live"] = {
-            "Stock": ["AAPL", "MSFT", "GOOG"],
-            "Start Price": [180, 320, 2900],
-            "Expected Price": [200, 350, 3100],
-            "Variance": [0.04, 0.06, 0.07],
-        }
-
-    fetched_data = []
-    skipped = []
-
-    if st.button("🔍 Fetch Live Data and Predict Future Price"):
-        prediction_days = 21
-        end = datetime.today()
-        start = end - timedelta(days=180)
-
-        for ticker in tickers:
-            try:
-                data = yf.download(ticker, start=start.strftime("%Y-%m-%d"), end=end.strftime("%Y-%m-%d"), interval="1d", progress=False)
-                closes = data["Close"]
-                if len(closes) < 30:
-                    skipped.append((ticker, "Not enough data (less than 30 rows)"))
-                    continue
-                X = np.arange(len(closes)).reshape(-1, 1)
-                y = closes.values
-                model = LinearRegression().fit(X, y)
-                future_day = np.array([[len(closes) + prediction_days]])
-                predicted_price = model.predict(future_day)[0]
-                start_price = closes.iloc[-2]
-                variance = closes.pct_change().var()
-                fetched_data.append((ticker, round(start_price, 2), round(predicted_price, 2), round(variance, 6)))
-            except Exception as e:
-                skipped.append((ticker, str(e)))
-
-        if fetched_data:
-            st.session_state["stock_data_live"] = {
-                "Stock": [t[0] for t in fetched_data],
-                "Start Price": [t[1] for t in fetched_data],
-                "Expected Price": [t[2] for t in fetched_data],
-                "Variance": [t[3] for t in fetched_data],
-            }
-
-        st.write("✅ Fetched data:", fetched_data)
-        st.write("⚠️ Skipped tickers:", skipped)
-
-    stock_data = st.session_state["stock_data_live"]
+    stock_data = {
+        "Stock": tickers,
+        "Start Price": [np.nan] * len(tickers),
+        "Expected Price": [np.nan] * len(tickers),
+        "Variance": [np.nan] * len(tickers),
+    }
     editable = True
     add_rows = True
 
-# === Shared logic from this point forward ===
 initial_data = pd.DataFrame(stock_data)
 st.subheader("Stock Parameters")
 stock_df = st.data_editor(initial_data, num_rows="dynamic" if add_rows else "fixed", use_container_width=True)
@@ -159,7 +113,6 @@ if not df_valid.empty and not df_valid[df_valid["Expected Return"] >= min_return
 else:
     st.warning("⚠️ No feasible portfolio found. Try reducing the target return or increasing max allocation.")
 
-# Side-by-side charts
 st.subheader("📊 Portfolio Analysis")
 col1, col2 = st.columns(2)
 
