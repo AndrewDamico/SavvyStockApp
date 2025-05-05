@@ -8,24 +8,36 @@ import cvxpy as cp
 st.set_page_config(page_title="Savvy Stock Portfolio Optimizer", layout="wide")
 st.title("📈 Savvy Stock Portfolio Optimizer")
 
-st.markdown("Explore the efficient frontier and simulate portfolio behavior based on return and risk preferences.")
+# Toggle between original and exploratory stock profiles
+profile = st.sidebar.radio("Choose Stock Data Profile", ["Original (Case-Based)", "Exploratory (Broader Risk Spread)"])
 
-# Editable stock table
-initial_data = pd.DataFrame({
-    "Stock": ["BB", "LOP", "ILI", "HEAL", "QUI", "AUA"],
-    "Start Price": [60, 127, 4, 50, 150, 20],
-    "Expected Price": [72, 127 * 1.42, 8, 75, 150 * 1.46, 26],
-    "Variance": [0.032, 0.1, 0.333, 0.125, 0.065, 0.08],
-})
+if profile == "Original (Case-Based)":
+    stock_data = {
+        "Stock": ["BB", "LOP", "ILI", "HEAL", "QUI", "AUA"],
+        "Start Price": [60, 127, 4, 50, 150, 20],
+        "Expected Price": [72, 180.34, 8, 75, 219, 26],
+        "Variance": [0.032, 0.1, 0.333, 0.125, 0.065, 0.08],
+    }
+else:
+    stock_data = {
+        "Stock": ["X", "Y", "Z", "Alpha", "Beta", "Gamma"],
+        "Start Price": [50, 100, 30, 80, 45, 25],
+        "Expected Price": [65, 115, 35, 110, 60, 30],
+        "Variance": [0.04, 0.08, 0.09, 0.06, 0.07, 0.05],
+    }
+
+initial_data = pd.DataFrame(stock_data)
+st.subheader("Editable Stock Parameters")
 stock_df = st.data_editor(initial_data, num_rows="fixed", use_container_width=True)
 stock_df = stock_df.dropna()
+
 stock_df["Start Price"] = pd.to_numeric(stock_df["Start Price"], errors="coerce")
 stock_df["Expected Price"] = pd.to_numeric(stock_df["Expected Price"], errors="coerce")
 stock_df["Variance"] = pd.to_numeric(stock_df["Variance"], errors="coerce")
+
 expected_returns = ((stock_df["Expected Price"] - stock_df["Start Price"]) / stock_df["Start Price"]).to_numpy()
 asset_names = stock_df["Stock"].tolist()
 
-# Covariance matrix
 base_corr = np.array([
     [1, 0.1, 0.8, -0.9, -0.8, 0.4],
     [0.1, 1, -0.7, -0.5, 0.2, 0],
@@ -44,8 +56,8 @@ eigvals = np.linalg.eigvalsh(cov_matrix)
 if np.any(eigvals < 0):
     cov_matrix += np.eye(n_assets) * (abs(min(eigvals)) + 1e-5)
 
-# Sidebar controls
-st.sidebar.header("Controls")
+# Sidebar Controls
+st.sidebar.header("Optimization Controls")
 min_return = st.sidebar.slider("Minimum Expected Return", 0.05, 0.60, 0.10, 0.01)
 max_alloc_toggle = st.sidebar.checkbox("Enable Max Allocation Constraint?", value=True)
 max_alloc_value = st.sidebar.slider("Max Allocation Per Stock (%)", 10, 100, 100, 5) / 100 if max_alloc_toggle else None
@@ -53,7 +65,7 @@ highlight_mvp = st.sidebar.checkbox("Highlight Minimum Variance Portfolio", valu
 solver = st.sidebar.selectbox("Solver", options=["ECOS", "SCS", "OSQP"])
 download_plotly = st.sidebar.checkbox("Enable Interactive Plotly Chart")
 
-# Efficient frontier
+# Optimization
 target_returns = np.linspace(0.05, 0.60, 200)
 risks, solutions, failed_targets = [], [], []
 
@@ -85,17 +97,17 @@ df["Expected Return"] = target_returns
 df["Risk (Std Dev)"] = risks
 df_valid = df.dropna()
 
-# Show optimal portfolio
+# Optimal Portfolio
 if not df_valid.empty and not df_valid[df_valid["Expected Return"] >= min_return].empty:
     selected_row = df_valid[df_valid["Expected Return"] >= min_return].iloc[0]
-    st.subheader("Optimal Portfolio at Selected Minimum Return")
-    st.write("📌 Expected Return:", round(selected_row["Expected Return"], 3))
-    st.write("📉 Risk (Std Dev):", round(selected_row["Risk (Std Dev)"], 3))
+    st.subheader("📌 Optimal Portfolio at Minimum Return Target")
+    st.write("Expected Return:", round(selected_row["Expected Return"], 3))
+    st.write("Risk (Std Dev):", round(selected_row["Risk (Std Dev)"], 3))
     st.dataframe(selected_row[asset_names].T.rename("Weight (%)") * 100)
 else:
     st.warning("⚠️ No feasible portfolio found. Try reducing the target return or increasing max allocation.")
 
-# Plots
+# Charts
 st.subheader("📊 Visualizations")
 col1, col2 = st.columns(2)
 
@@ -114,7 +126,7 @@ with col1:
     st.pyplot(fig2)
 
 with col2:
-    st.markdown("### Asset Weights by Return")
+    st.markdown("### Asset Weights by Return Target")
     fig, ax = plt.subplots(figsize=(8, 6))
     for col in asset_names:
         ax.plot(df["Expected Return"], df[col], label=col)
@@ -124,21 +136,30 @@ with col2:
     ax.legend()
     st.pyplot(fig)
 
-# Optional interactive Plotly chart
 if download_plotly and not df_valid.empty:
     st.subheader("📈 Interactive Plotly Chart")
-    fig_hover = px.scatter(df_valid, x="Risk (Std Dev)", y="Expected Return", title="Efficient Frontier (Interactive)", hover_data=asset_names)
+    fig_hover = px.scatter(df_valid, x="Risk (Std Dev)", y="Expected Return", hover_data=asset_names, title="Efficient Frontier (Hover)")
     st.plotly_chart(fig_hover, use_container_width=True)
+
+# Diagnostics
+st.subheader("🧪 Diagnostics")
+if not df_valid.empty:
+    st.dataframe(df_valid[["Expected Return", "Risk (Std Dev)"]].head(10))
+    st.write(f"📉 Min Std Dev: {df_valid['Risk (Std Dev)'].min():.5f}")
+    st.write(f"📈 Max Std Dev: {df_valid['Risk (Std Dev)'].max():.5f}")
+    st.write(f"📊 Std Dev Range: {(df_valid['Risk (Std Dev)'].max() - df_valid['Risk (Std Dev)'].min()):.5f}")
+else:
+    st.write("No feasible results to display.")
 
 # Glossary
 st.subheader("📘 Glossary of Terms")
 st.markdown("""
-- **Expected Return**: Estimated percentage gain based on future prices.
-- **Risk (Std Dev)**: A measure of how much the portfolio value might fluctuate.
-- **Efficient Frontier**: A set of optimal portfolios that provide the best return for a given level of risk.
-- **Minimum Variance Portfolio**: The portfolio with the least risk, regardless of return.
-- **Solver**: The algorithm used to solve the optimization (ECOS is usually most stable).
-- **Allocation Constraint**: A rule that limits how much of the portfolio can be invested in any one asset.
-- **Portfolio Weights**: The percentage of total capital assigned to each asset.
-- **Covariance Matrix**: A matrix showing how assets’ returns move together, used to compute risk.
+- **Expected Return**: Projected gain based on stock price targets.
+- **Risk (Standard Deviation)**: The volatility of the portfolio's return.
+- **Efficient Frontier**: A curve showing optimal portfolios for each risk level.
+- **Minimum Variance Portfolio**: The portfolio with the lowest risk.
+- **Solver**: Mathematical engine used to optimize weights.
+- **Max Allocation Constraint**: Limits how much capital can go into one stock.
+- **Covariance Matrix**: Encodes how returns of assets move together.
+- **Portfolio Weights**: Proportional investment in each asset.
 """)
