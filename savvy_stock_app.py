@@ -7,27 +7,36 @@ import cvxpy as cp
 st.set_page_config(page_title="Savvy Stock Portfolio Optimizer", layout="wide")
 st.title("📈 Savvy Stock Selection: Portfolio Optimizer")
 
-# Define expected returns
-expected_returns = np.array([
-    (72 - 60) / 60,
-    (127 * 1.42 - 127) / 127,
-    (8 - 4) / 4,
-    (75 - 50) / 50,
-    (150 * 1.46 - 150) / 150,
-    (26 - 20) / 20
-], dtype=np.float64)
-asset_names = ['BB', 'LOP', 'ILI', 'HEAL', 'QUI', 'AUA']
+st.markdown("Edit the stock parameters below to run custom portfolio scenarios:")
 
-# Covariance matrix
-raw_cov = np.array([
-    [0.032, 0.005, 0.03, -0.031, -0.027, 0.01],
-    [0.005, 0.1, -0.07, -0.05, 0.02, 0],
-    [0.03, -0.07, 0.333, -0.11, -0.02, 0.042],
-    [-0.031, -0.05, -0.11, 0.125, 0.05, -0.06],
-    [-0.027, 0.02, -0.02, 0.05, 0.065, -0.02],
-    [0.01, 0, 0.042, -0.06, -0.02, 0.08]
+# Initial stock data
+initial_data = pd.DataFrame({
+    "Stock": ["BB", "LOP", "ILI", "HEAL", "QUI", "AUA"],
+    "Start Price": [60, 127, 4, 50, 150, 20],
+    "Expected Price": [72, 127 * 1.42, 8, 75, 150 * 1.46, 26],
+    "Variance": [0.032, 0.1, 0.333, 0.125, 0.065, 0.08],
+})
+
+# Editable table
+stock_df = st.data_editor(initial_data, num_rows="fixed", use_container_width=True)
+
+# Calculate expected returns
+expected_returns = ((stock_df["Expected Price"] - stock_df["Start Price"]) / stock_df["Start Price"]).to_numpy(dtype=np.float64)
+asset_names = stock_df["Stock"].tolist()
+
+# Covariance matrix (editable variances with fixed correlations)
+base_corr = np.array([
+    [1, 0.1, 0.8, -0.9, -0.8, 0.4],
+    [0.1, 1, -0.7, -0.5, 0.2, 0],
+    [0.8, -0.7, 1, -0.6, -0.3, 0.5],
+    [-0.9, -0.5, -0.6, 1, 0.6, -0.7],
+    [-0.8, 0.2, -0.3, 0.6, 1, -0.3],
+    [0.4, 0, 0.5, -0.7, -0.3, 1]
 ], dtype=np.float64)
-cov_matrix = (raw_cov + raw_cov.T) / 2
+variances = stock_df["Variance"].to_numpy(dtype=np.float64)
+std_devs = np.sqrt(variances)
+cov_matrix = np.outer(std_devs, std_devs) * base_corr
+cov_matrix = (cov_matrix + cov_matrix.T) / 2
 eigvals = np.linalg.eigvalsh(cov_matrix)
 if np.any(eigvals < 0):
     cov_matrix += np.eye(6) * (abs(min(eigvals)) + 1e-5)
