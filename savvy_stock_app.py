@@ -1,4 +1,3 @@
-
 import streamlit as st
 import numpy as np
 import pandas as pd
@@ -44,110 +43,114 @@ else:
     }
     editable=True; add_rows=True
 
+# --- Sidebar: Optimization & Risk Settings ---
+st.sidebar.header("Optimization & Risk Settings")
+min_return = st.sidebar.slider("Min Expected Return", 0.01, 1.0, 0.2, 0.01)
+risk_model = st.sidebar.selectbox("Select Risk Model for Optimization",
+                                  ["Variance", "CVaR (approx)", "Max Drawdown (approx)"])
+st.sidebar.markdown("""
+**Risk Models Defined:**
+- **Variance**: Portfolio volatility.  
+- **CVaR**: Avg. loss beyond a worst-case percentile (requires simulation).  
+- **Max Drawdown**: Largest peak-to-trough drop (via simulated paths).
+""")
+num_sims = st.sidebar.number_input("Simulation Paths", 100, 10000, 1000, 100)
+horizon = st.sidebar.number_input("Simulation Horizon (days)", 30, 252, 126, 1)
+alpha = st.sidebar.slider("CVaR Confidence Level", 0.90, 0.99, 0.95, 0.01)
+
+# --- Prepare Data ---
 df_input = pd.DataFrame(stock_data)
 st.subheader("Stock Parameters")
 stock_df = st.data_editor(df_input, num_rows="dynamic" if add_rows else "fixed", use_container_width=True)
-stock_df["Start Price"] = pd.to_numeric(stock_df["Start Price"],errors="coerce")
-stock_df["Expected Price"] = pd.to_numeric(stock_df["Expected Price"],errors="coerce")
-stock_df["Variance"] = pd.to_numeric(stock_df["Variance"],errors="coerce")
-if stock_df.isnull().any().any():
-    st.error("Please fill all price & variance values.")
+
+# Validate and compute metrics
+stock_df["Start Price"] = pd.to_numeric(stock_df["Start Price"], errors="coerce")
+stock_df["Expected Price"] = pd.to_numeric(stock_df["Expected Price"], errors="coerce")
+stock_df["Variance"] = pd.to_numeric(stock_df["Variance"], errors="coerce")
+if stock_df.isnull().any(axis=1).any():
+    st.error("Please ensure all price and variance fields are numeric.")
     st.stop()
 
 names = stock_df["Stock"].tolist()
-mu = ((stock_df["Expected Price"]-stock_df["Start Price"])/stock_df["Start Price"]).to_numpy()
+mu = ((stock_df["Expected Price"] - stock_df["Start Price"]) / stock_df["Start Price"]).to_numpy()
 sigma2 = stock_df["Variance"].to_numpy()
-Sigma = np.diag(sigma2)
+Sigma = np.diag(sigma2)  # No correlation by default
 
-# --- Sidebar: Optimization & Risk Settings ---
-st.sidebar.header("Optimization & Risk")
-min_return = st.sidebar.slider("Min Expected Return",0.01,1.0,0.2,0.01)
-risk_model = st.sidebar.selectbox("Risk Model",["Variance","CVaR","Max Drawdown"])
-num_sims = st.sidebar.number_input("Simulation Paths",100,10000,1000,100)
-horizon = st.sidebar.number_input("Simulation Horizon (days)",30,252,126,1)
-alpha = st.sidebar.slider("CVaR Confidence Level",0.90,0.99,0.95,0.01)
-
-# --- Mean-Variance Frontier ---
+# --- Mean-Variance Optimization (always computed) ---
 N = len(names)
 x = cp.Variable(N)
-cons = [cp.sum(x)==1, x>=0]
-rets = np.linspace(min(mu),max(mu),100)
-risks_mv,weights_mv = [],[]
+constraints = [cp.sum(x)==1, x>=0]
+rets = np.linspace(mu.min(), mu.max(), 100)
+frontier = []
 for R in rets:
-    prob = cp.Problem(cp.Minimize(cp.quad_form(x,Sigma)), cons+[mu@x>=R])
+    prob = cp.Problem(cp.Minimize(cp.quad_form(x, Sigma)), constraints + [mu @ x >= R])
     prob.solve(solver=cp.ECOS)
-    if x.value is not None:
-        risks_mv.append(np.sqrt(float(x.value.T@Sigma@x.value)))
-        weights_mv.append(x.value)
+    frontier.append((R, float(np.sqrt(x.value.T @ Sigma @ x.value))) if x.value is not None else (R, None))
+df_front = pd.DataFrame(frontier, columns=["Return","Risk"])
+
+# --- Select Portfolio at min_return ---
+valid = df_front.dropna()
+opt_row = valid[valid["Return"] >= min_return].iloc[0]
+# Retrieve weights by re-solving for that target
+prob_opt = cp.Problem(cp.Minimize(cp.quad_form(x, Sigma)), constraints + [mu @ x >= opt_row["Return"]])
+prob_opt.solve(solver=cp.ECOS)
+w_opt = np.array(x.value).flatten()
+
+# --- Simulation for CVaR/Drawdown ---
+term_rets = None; CVaR_val = None; avg_dd = None
+if risk_model != "Variance":
+    dt = 1/252
+    sims = np.random.multivariate_normal(mu*dt, np.diag(sigma2*dt), (num_sims, horizon))
+    port_vals = np.cumprod(1 + sims @ w_opt.reshape(-1,1), axis=1)
+    term_rets = port_vals[:,-1] - 1
+    losses = -term_rets
+    drawdowns = np.max(1 - port_vals / np.maximum.accumulate(port_vals,axis=1), axis=1)
+    if "CVaR" in risk_model:
+        VaR = np.quantile(losses, alpha)
+        CVaR_val = losses[losses >= VaR].mean()
     else:
-        risks_mv.append(None)
-        weights_mv.append([None]*N)
-df_mv = pd.DataFrame(weights_mv,columns=names)
-df_mv["Return"]=rets; df_mv["StdDev"]=risks_mv
-df_valid = df_mv.dropna()
+        avg_dd = drawdowns.mean()
 
-# --- Select optimal portfolio row ---
-opt = df_valid[df_valid["Return"]>=min_return].iloc[0]
-w_opt = opt[names].to_numpy()
-opt_r = opt["Return"]; opt_sd = opt["StdDev"]
-
-# --- Simulation for CVaR & Drawdown ---
-dt=1/252
-# simulate returns
-simrets = np.random.multivariate_normal(mu*dt,np.diag(sigma2*dt),(num_sims,horizon))
-# portfolio value paths
-pv = np.cumprod(1 + simrets @ w_opt.reshape(-1,1),axis=1)
-term_ret = pv[:,-1]-1
-# compute CVaR
-losses = -term_ret
-VaR = np.quantile(losses,alpha)
-CVaR = losses[losses>=VaR].mean()
-# compute max drawdown
-drawdowns = np.max(1 - pv/np.maximum.accumulate(pv,axis=1),axis=1)
-avg_dd = drawdowns.mean()
-
-# --- Display ---
-st.subheader(f"Optimal Portfolio (Min Return {min_return:.2f})")
-st.write(pd.Series(w_opt,index=names).rename("Weight"))
+# --- Display Results ---
+st.subheader(f"Optimal Portfolio for Min Return {min_return:.2f}")
+st.table(pd.DataFrame({"Weight": w_opt}, index=names))
 
 st.markdown("**Risk Metric:**")
-if risk_model=="Variance":
-    st.write(f"Std Dev: {opt_sd:.4f}")
-elif risk_model=="CVaR":
-    st.write(f"CVaR @ {alpha*100:.0f}%: {CVaR:.4f}")
+if risk_model == "Variance":
+    st.write(f"Standard Deviation: {opt_row['Risk']:.4f}")
+elif "CVaR" in risk_model:
+    st.write(f"CVaR @{int(alpha*100)}%: {CVaR_val:.4f}")
 else:
     st.write(f"Avg Max Drawdown: {avg_dd:.4f}")
 
 # --- Plots ---
-col1,col2=st.columns(2)
+col1, col2 = st.columns(2)
 with col1:
-    st.markdown("### Efficient Frontier")
-    fig,ax=plt.subplots(figsize=(6,4))
-    ax.plot(df_valid["StdDev"],df_valid["Return"],label="Frontier")
-    ax.scatter(opt_sd,opt_r,color="red",label="Selected")
-    ax.set_xlabel("Std Dev"); ax.set_ylabel("Return"); ax.legend()
+    st.markdown("### Efficient Frontier (Variance)")
+    fig, ax = plt.subplots(figsize=(6,4))
+    ax.plot(df_front["Risk"], df_front["Return"], label="Frontier")
+    ax.scatter(opt_row["Risk"], opt_row["Return"], color="red", label="Selected")
+    ax.set_xlabel("Risk (Std Dev)"); ax.set_ylabel("Return"); ax.legend()
     st.pyplot(fig)
+
 with col2:
-    if risk_model=="Variance":
-        st.markdown("### Return Distribution")
-        st.plotly_chart(px.histogram(term_ret,title="Simulated Terminal Returns"),use_container_width=True)
-    elif risk_model=="CVaR":
-        st.markdown("### Loss Distribution")
-        st.plotly_chart(px.histogram(losses,nbins=50,title="Losses for CVaR"),use_container_width=True)
+    if risk_model == "Variance":
+        st.markdown("### Return Distribution (Simulated Placeholder)")
+        st.write("Switch to CVaR or Drawdown to see simulations.")
+    elif "CVaR" in risk_model:
+        st.markdown("### Loss Distribution for CVaR")
+        st.plotly_chart(px.histogram(losses, nbins=50, title="Loss Distribution"), use_container_width=True)
     else:
-        st.markdown("### Example Drawdown Path")
-        fig2,ax2=plt.subplots(figsize=(6,4))
-        ax2.plot(drawdowns[:horizon])
-        ax2.set_title("Sample Drawdown"); ax2.set_ylabel("Drawdown")
-        st.pyplot(fig2)
+        st.markdown("### Drawdown Distribution")
+        st.plotly_chart(px.histogram(drawdowns, nbins=50, title="Drawdown Distribution"), use_container_width=True)
 
 # --- Glossary ---
-st.subheader("📘 Glossary")
+st.subheader("📘 Glossary of Terms")
 st.markdown("""
-- **Expected Return**: Predicted % gain based on prices.
-- **Standard Deviation**: Total volatility (Variance model).
-- **CVaR**: Avg loss beyond Value-at-Risk at confidence α.
-- **Max Drawdown**: Largest peak-to-trough drop.
-- **Simulation Paths**: Monte Carlo for returns estimation.
-- **Optimization**: Minimize chosen risk metric under return constraint.
+- **Expected Return**: Predicted % gain.
+- **Standard Deviation (Variance)**: Total volatility measure.
+- **CVaR**: Average of worst losses beyond a percentile.
+- **Max Drawdown**: Largest peak-to-trough loss.
+- **Simulation Paths**: Monte Carlo return scenarios.
+- **Optimization**: Minimize selected risk metric under return constraint.
 """)
