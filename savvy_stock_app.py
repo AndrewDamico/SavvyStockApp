@@ -60,7 +60,7 @@ for target in target_returns:
         else:
             risks.append(None)
             solutions.append([None]*6)
-    except Exception as e:
+    except Exception:
         risks.append(None)
         solutions.append([None]*6)
 
@@ -70,12 +70,15 @@ df["Expected Return"] = target_returns
 df["Risk (Std Dev)"] = risks
 df_valid = df.dropna()
 
-# Optimal portfolio at chosen return
-selected_row = df_valid[df_valid["Expected Return"] >= min_return].iloc[0]
-st.subheader("Optimal Portfolio at Selected Minimum Return")
-st.write("📌 Expected Return:", round(selected_row["Expected Return"], 3))
-st.write("📉 Risk (Std Dev):", round(selected_row["Risk (Std Dev)"], 3))
-st.dataframe(selected_row[asset_names].T.rename("Weight (%)") * 100)
+# Check for valid solutions
+if not df_valid.empty and not df_valid[df_valid["Expected Return"] >= min_return].empty:
+    selected_row = df_valid[df_valid["Expected Return"] >= min_return].iloc[0]
+    st.subheader("Optimal Portfolio at Selected Minimum Return")
+    st.write("📌 Expected Return:", round(selected_row["Expected Return"], 3))
+    st.write("📉 Risk (Std Dev):", round(selected_row["Risk (Std Dev)"], 3))
+    st.dataframe(selected_row[asset_names].T.rename("Weight (%)") * 100)
+else:
+    st.warning("⚠️ No feasible portfolio found for this expected return and constraint combination. Try reducing the target return or increasing max allocation.")
 
 # Side-by-side plots
 st.subheader("📊 Visualization")
