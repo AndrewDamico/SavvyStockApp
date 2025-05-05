@@ -155,7 +155,9 @@ with col2:
 # --- Asset Weights by Return Target ---
 st.subheader("Asset Weights by Return Target (Mean-Variance Frontier)")
 fig_wt, ax_wt = plt.subplots(figsize=(6,4))
-df_weights = df_front.copy()
+# Use the mean-variance weights DataFrame (df_mv) to plot allocations
+# df_mv contains weights for each asset and columns [asset names, 'Return', 'StdDev']
+df_weights = df_mv.dropna()
 for name in names:
     ax_wt.plot(df_weights["Return"], df_weights[name], label=name)
 ax_wt.set_xlabel("Expected Return"); ax_wt.set_ylabel("Weight")
