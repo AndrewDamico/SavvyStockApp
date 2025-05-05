@@ -81,22 +81,30 @@ N = len(names)
 x = cp.Variable(N)
 constraints = [cp.sum(x)==1, x>=0]
 rets = np.linspace(mu.min(), mu.max(), 100)
-frontier = []
+weights_mv = []
+risks_mv = []
 for R in rets:
     prob = cp.Problem(cp.Minimize(cp.quad_form(x, Sigma)), constraints + [mu @ x >= R])
     prob.solve(solver=cp.ECOS)
-    frontier.append((R, float(np.sqrt(x.value.T @ Sigma @ x.value))) if x.value is not None else (R, None))
-df_front = pd.DataFrame(frontier, columns=["Return","Risk"])
+    if x.value is not None:
+        w = np.array(x.value).flatten()
+        weights_mv.append(w)
+        risks_mv.append(np.sqrt(w.T @ Sigma @ w))
+    else:
+        weights_mv.append([None]*N)
+        risks_mv.append(None)
+df_mv = pd.DataFrame(weights_mv, columns=names)
+df_mv["Return"] = rets
+df_mv["StdDev"] = risks_mv
+df_valid = df_mv.dropna()
 
 # --- Select Portfolio at min_return ---
-valid = df_front.dropna()
-opt_row = valid[valid["Return"] >= min_return].iloc[0]
-# Retrieve weights by re-solving for that target
+opt_row = df_valid[df_valid["Return"] >= min_return].iloc[0]
 prob_opt = cp.Problem(cp.Minimize(cp.quad_form(x, Sigma)), constraints + [mu @ x >= opt_row["Return"]])
 prob_opt.solve(solver=cp.ECOS)
 w_opt = np.array(x.value).flatten()
 
-# --- Simulation for CVaR/Drawdown ---
+# --- Simulation for CVaR/Drawdown if needed ---
 term_rets = None; CVaR_val = None; avg_dd = None
 if risk_model != "Variance":
     dt = 1/252
@@ -117,7 +125,7 @@ st.table(pd.DataFrame({"Weight": w_opt}, index=names))
 
 st.markdown("**Risk Metric:**")
 if risk_model == "Variance":
-    st.write(f"Standard Deviation: {opt_row['Risk']:.4f}")
+    st.write(f"Standard Deviation: {opt_row['StdDev']:.4f}")
 elif "CVaR" in risk_model:
     st.write(f"CVaR @{int(alpha*100)}%: {CVaR_val:.4f}")
 else:
@@ -128,11 +136,10 @@ col1, col2 = st.columns(2)
 with col1:
     st.markdown("### Efficient Frontier (Variance)")
     fig, ax = plt.subplots(figsize=(6,4))
-    ax.plot(df_front["Risk"], df_front["Return"], label="Frontier")
-    ax.scatter(opt_row["Risk"], opt_row["Return"], color="red", label="Selected")
+    ax.plot(df_valid["StdDev"], df_valid["Return"], label="Frontier")
+    ax.scatter(opt_row["StdDev"], opt_row["Return"], color="red", label="Selected")
     ax.set_xlabel("Risk (Std Dev)"); ax.set_ylabel("Return"); ax.legend()
     st.pyplot(fig)
-
 with col2:
     if risk_model == "Variance":
         st.markdown("### Return Distribution (Simulated Placeholder)")
@@ -144,13 +151,24 @@ with col2:
         st.markdown("### Drawdown Distribution")
         st.plotly_chart(px.histogram(drawdowns, nbins=50, title="Drawdown Distribution"), use_container_width=True)
 
+# --- Asset Weights by Return Target ---
+st.subheader("Asset Weights by Return Target (Mean-Variance Frontier)")
+fig_wt, ax_wt = plt.subplots(figsize=(6,4))
+df_weights = df_mv.copy()
+for name in names:
+    ax_wt.plot(df_weights["Return"], df_weights[name], label=name)
+ax_wt.set_xlabel("Expected Return"); ax_wt.set_ylabel("Weight")
+ax_wt.set_title("Asset Allocation vs Return")
+ax_wt.legend()
+st.pyplot(fig_wt)
+
 # --- Glossary ---
 st.subheader("📘 Glossary of Terms")
 st.markdown("""
-- **Expected Return**: Predicted % gain.
-- **Standard Deviation (Variance)**: Total volatility measure.
-- **CVaR**: Average of worst losses beyond a percentile.
-- **Max Drawdown**: Largest peak-to-trough loss.
-- **Simulation Paths**: Monte Carlo return scenarios.
-- **Optimization**: Minimize selected risk metric under return constraint.
+- **Expected Return**: Predicted % gain.  
+- **Standard Deviation (Variance)**: Total volatility measure.  
+- **CVaR**: Average of worst losses beyond a percentile.  
+- **Max Drawdown**: Largest peak-to-trough loss.  
+- **Simulation Paths**: Monte Carlo return scenarios.  
+- **Optimization**: Minimize selected risk metric under return constraint.  
 """)
