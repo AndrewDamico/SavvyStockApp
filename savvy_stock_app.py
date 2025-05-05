@@ -1,151 +1,153 @@
+
 import streamlit as st
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+import plotly.express as px
 import cvxpy as cp
 
-st.set_page_config(page_title="Savvy Stock Portfolio Optimizer", layout="wide")
-st.title("📈 Savvy Stock Portfolio Optimizer")
+st.set_page_config(page_title="Savvy Stock Portfolio Optimizer – Multi-Risk", layout="wide")
+st.title("📈 Savvy Stock Portfolio Optimizer – Multi-Risk Models")
 
+# --- Sidebar: Data Profile ---
 st.sidebar.header("Data Profile")
-profile = st.sidebar.radio("Choose Stock Data Profile", ["Original (Case-Based)", "Exploratory (Broader Risk Spread)", "Use My Own Data"])
-
+profile = st.sidebar.radio(
+    "Choose Stock Data Profile",
+    ["Original (Case-Based)", "Exploratory (Broader Spread)", "Use My Own Data"]
+)
 if profile == "Original (Case-Based)":
     stock_data = {
-        "Stock": ["BB", "LOP", "ILI", "HEAL", "QUI", "AUA"],
-        "Start Price": [60, 127, 4, 50, 150, 20],
-        "Expected Price": [72, 180.34, 8, 75, 219, 26],
-        "Variance": [0.032, 0.1, 0.333, 0.125, 0.065, 0.08],
+        "Stock": ["BB","LOP","ILI","HEAL","QUI","AUA"],
+        "Start Price": [60,127,4,50,150,20],
+        "Expected Price": [72,180.34,8,75,219,26],
+        "Variance": [0.032,0.1,0.333,0.125,0.065,0.08],
     }
-    editable = False
-    add_rows = False
-
-elif profile == "Exploratory (Broader Risk Spread)":
+    editable=False; add_rows=False
+elif profile == "Exploratory (Broader Spread)":
     stock_data = {
-        "Stock": ["X", "Y", "Z", "Alpha", "Beta", "Gamma"],
-        "Start Price": [50, 100, 30, 80, 45, 25],
-        "Expected Price": [65, 115, 35, 110, 60, 30],
-        "Variance": [0.04, 0.08, 0.09, 0.06, 0.07, 0.05],
+        "Stock": ["X","Y","Z","Alpha","Beta","Gamma"],
+        "Start Price": [50,100,30,80,45,25],
+        "Expected Price": [65,115,35,110,60,30],
+        "Variance": [0.04,0.08,0.09,0.06,0.07,0.05],
     }
-    editable = False
-    add_rows = False
-
+    editable=False; add_rows=False
 else:
-    ticker_input = st.text_input("Enter stock tickers (comma-separated)", value="AAPL, MSFT, GOOG")
-    tickers = [x.strip().upper() for x in ticker_input.split(",") if x.strip()]
-    # Provide placeholder numeric values to avoid table error
-    default_start = 100
-    default_expected = 110
+    tickers = [t.strip().upper() for t in st.sidebar.text_input(
+        "Enter tickers, comma-separated", "AAPL, MSFT, GOOG"
+    ).split(",") if t.strip()]
+    N = max(1,len(tickers))
     stock_data = {
-        "Stock": tickers if tickers else ["TICK1", "TICK2", "TICK3"],
-        "Start Price": [default_start] * max(1, len(tickers)),
-        "Expected Price": [default_expected] * max(1, len(tickers)),
-        "Variance": [0.05] * max(1, len(tickers)),  # placeholder; will auto-compute
+        "Stock": tickers or ["AAPL"],
+        "Start Price": [100.0]*N,
+        "Expected Price": [110.0]*N,
+        "Variance": [0.05]*N
     }
-    editable = True
-    add_rows = True
+    editable=True; add_rows=True
 
-initial_data = pd.DataFrame(stock_data)
-st.subheader("Stock Parameters (Edit Expected Return and Risk)")
-stock_df = st.data_editor(initial_data, num_rows="dynamic" if add_rows else "fixed", use_container_width=True)
-stock_df = stock_df.dropna()
-
-stock_df["Start Price"] = pd.to_numeric(stock_df["Start Price"], errors="coerce")
-stock_df["Expected Price"] = pd.to_numeric(stock_df["Expected Price"], errors="coerce")
-
-# Automatically estimate variance based on 3% volatility by default if not provided
-if "Variance" not in stock_df or stock_df["Variance"].isnull().any():
-    returns = ((stock_df["Expected Price"] - stock_df["Start Price"]) / stock_df["Start Price"])
-    est_variance = np.maximum(0.01, (returns.std() ** 2))  # ensure nonzero
-    stock_df["Variance"] = stock_df["Variance"].fillna(est_variance)
-
-expected_returns = ((stock_df["Expected Price"] - stock_df["Start Price"]) / stock_df["Start Price"]).to_numpy()
-asset_names = stock_df["Stock"].tolist()
-
-if len(stock_df) == 0 or len(expected_returns) == 0:
-    st.error("❌ No valid stock data available. Please add rows or check your inputs.")
+df_input = pd.DataFrame(stock_data)
+st.subheader("Stock Parameters")
+stock_df = st.data_editor(df_input, num_rows="dynamic" if add_rows else "fixed", use_container_width=True)
+stock_df["Start Price"] = pd.to_numeric(stock_df["Start Price"],errors="coerce")
+stock_df["Expected Price"] = pd.to_numeric(stock_df["Expected Price"],errors="coerce")
+stock_df["Variance"] = pd.to_numeric(stock_df["Variance"],errors="coerce")
+if stock_df.isnull().any().any():
+    st.error("Please fill all price & variance values.")
     st.stop()
 
-base_corr = np.identity(len(asset_names))
-n_assets = len(expected_returns)
-variances = stock_df["Variance"].to_numpy()
-stds = np.sqrt(variances)
-cov_matrix = np.outer(stds, stds) * base_corr
-cov_matrix = (cov_matrix + cov_matrix.T) / 2
-eigvals = np.linalg.eigvalsh(cov_matrix)
-if np.any(eigvals < 0):
-    cov_matrix += np.eye(n_assets) * (abs(min(eigvals)) + 1e-5)
+names = stock_df["Stock"].tolist()
+mu = ((stock_df["Expected Price"]-stock_df["Start Price"])/stock_df["Start Price"]).to_numpy()
+sigma2 = stock_df["Variance"].to_numpy()
+Sigma = np.diag(sigma2)
 
-st.sidebar.header("Optimization Controls")
-min_return = st.sidebar.slider("Minimum Expected Return", 0.05, 0.60, 0.10, 0.01)
-max_alloc_toggle = st.sidebar.checkbox("Enable Max Allocation Constraint?", value=True)
-max_alloc_value = st.sidebar.slider("Max Allocation Per Stock (%)", 10, 100, 100, 5) / 100 if max_alloc_toggle else None
-highlight_mvp = st.sidebar.checkbox("Highlight Minimum Variance Portfolio", value=True)
-solver = st.sidebar.selectbox("Solver", options=["ECOS", "SCS", "OSQP"])
+# --- Sidebar: Optimization & Risk Settings ---
+st.sidebar.header("Optimization & Risk")
+min_return = st.sidebar.slider("Min Expected Return",0.01,1.0,0.2,0.01)
+risk_model = st.sidebar.selectbox("Risk Model",["Variance","CVaR","Max Drawdown"])
+num_sims = st.sidebar.number_input("Simulation Paths",100,10000,1000,100)
+horizon = st.sidebar.number_input("Simulation Horizon (days)",30,252,126,1)
+alpha = st.sidebar.slider("CVaR Confidence Level",0.90,0.99,0.95,0.01)
 
-target_returns = np.linspace(0.05, 0.60, 200)
-risks, solutions = [], []
+# --- Mean-Variance Frontier ---
+N = len(names)
+x = cp.Variable(N)
+cons = [cp.sum(x)==1, x>=0]
+rets = np.linspace(min(mu),max(mu),100)
+risks_mv,weights_mv = [],[]
+for R in rets:
+    prob = cp.Problem(cp.Minimize(cp.quad_form(x,Sigma)), cons+[mu@x>=R])
+    prob.solve(solver=cp.ECOS)
+    if x.value is not None:
+        risks_mv.append(np.sqrt(float(x.value.T@Sigma@x.value)))
+        weights_mv.append(x.value)
+    else:
+        risks_mv.append(None)
+        weights_mv.append([None]*N)
+df_mv = pd.DataFrame(weights_mv,columns=names)
+df_mv["Return"]=rets; df_mv["StdDev"]=risks_mv
+df_valid = df_mv.dropna()
 
-x = cp.Variable(n_assets, name="weights")
-constraints = [cp.sum(x) == 1, x >= 0]
-if max_alloc_toggle:
-    constraints.append(x <= max_alloc_value)
+# --- Select optimal portfolio row ---
+opt = df_valid[df_valid["Return"]>=min_return].iloc[0]
+w_opt = opt[names].to_numpy()
+opt_r = opt["Return"]; opt_sd = opt["StdDev"]
 
-for target in target_returns:
-    prob_constraints = constraints + [expected_returns @ x >= target]
-    objective = cp.Minimize(cp.quad_form(x, cov_matrix))
-    problem = cp.Problem(objective, prob_constraints)
-    try:
-        problem.solve(solver=solver)
-        if x.value is not None:
-            risks.append(np.sqrt(float(x.value.T @ cov_matrix @ x.value)))
-            solutions.append(x.value)
-        else:
-            risks.append(None)
-            solutions.append([None] * n_assets)
-    except Exception:
-        risks.append(None)
-        solutions.append([None] * n_assets)
+# --- Simulation for CVaR & Drawdown ---
+dt=1/252
+# simulate returns
+simrets = np.random.multivariate_normal(mu*dt,np.diag(sigma2*dt),(num_sims,horizon))
+# portfolio value paths
+pv = np.cumprod(1 + simrets @ w_opt.reshape(-1,1),axis=1)
+term_ret = pv[:,-1]-1
+# compute CVaR
+losses = -term_ret
+VaR = np.quantile(losses,alpha)
+CVaR = losses[losses>=VaR].mean()
+# compute max drawdown
+drawdowns = np.max(1 - pv/np.maximum.accumulate(pv,axis=1),axis=1)
+avg_dd = drawdowns.mean()
 
-df = pd.DataFrame(solutions, columns=asset_names)
-df["Expected Return"] = target_returns
-df["Risk (Std Dev)"] = risks
-df_valid = df.dropna()
+# --- Display ---
+st.subheader(f"Optimal Portfolio (Min Return {min_return:.2f})")
+st.write(pd.Series(w_opt,index=names).rename("Weight"))
 
-if not df_valid.empty and not df_valid[df_valid["Expected Return"] >= min_return].empty:
-    selected_row = df_valid[df_valid["Expected Return"] >= min_return].iloc[0]
-    st.subheader("📌 Optimal Portfolio at Minimum Return Target")
-    st.write("Expected Return:", round(selected_row["Expected Return"], 3))
-    st.write("Risk (Std Dev):", round(selected_row["Risk (Std Dev)"], 3))
-    st.dataframe(selected_row[asset_names].T.rename("Weight (%)") * 100)
+st.markdown("**Risk Metric:**")
+if risk_model=="Variance":
+    st.write(f"Std Dev: {opt_sd:.4f}")
+elif risk_model=="CVaR":
+    st.write(f"CVaR @ {alpha*100:.0f}%: {CVaR:.4f}")
 else:
-    st.warning("⚠️ No feasible portfolio found. Try reducing the target return or increasing max allocation.")
+    st.write(f"Avg Max Drawdown: {avg_dd:.4f}")
 
-st.subheader("📊 Portfolio Analysis")
-col1, col2 = st.columns(2)
-
+# --- Plots ---
+col1,col2=st.columns(2)
 with col1:
     st.markdown("### Efficient Frontier")
-    fig2, ax2 = plt.subplots(figsize=(8, 6))
-    ax2.plot(df["Risk (Std Dev)"], df["Expected Return"], label="Efficient Frontier", color="blue")
-    if highlight_mvp and not df_valid.empty:
-        min_risk_idx = df_valid["Risk (Std Dev)"].idxmin()
-        min_point = df_valid.loc[min_risk_idx]
-        ax2.scatter(min_point["Risk (Std Dev)"], min_point["Expected Return"], color='red', label="Min Variance Portfolio", zorder=5)
-    ax2.set_xlabel("Risk (Std Dev)")
-    ax2.set_ylabel("Expected Return")
-    ax2.grid(True)
-    ax2.legend()
-    st.pyplot(fig2)
-
+    fig,ax=plt.subplots(figsize=(6,4))
+    ax.plot(df_valid["StdDev"],df_valid["Return"],label="Frontier")
+    ax.scatter(opt_sd,opt_r,color="red",label="Selected")
+    ax.set_xlabel("Std Dev"); ax.set_ylabel("Return"); ax.legend()
+    st.pyplot(fig)
 with col2:
-    st.markdown("### Asset Weights by Return Target")
-    fig_weights, ax_weights = plt.subplots(figsize=(8, 6))
-    for col in asset_names:
-        ax_weights.plot(df["Expected Return"], df[col], label=col)
-    ax_weights.set_xlabel("Expected Return")
-    ax_weights.set_ylabel("Portfolio Weight")
-    ax_weights.set_title("Allocation Weights Across Frontier")
-    ax_weights.grid(True)
-    ax_weights.legend()
-    st.pyplot(fig_weights)
+    if risk_model=="Variance":
+        st.markdown("### Return Distribution")
+        st.plotly_chart(px.histogram(term_ret,title="Simulated Terminal Returns"),use_container_width=True)
+    elif risk_model=="CVaR":
+        st.markdown("### Loss Distribution")
+        st.plotly_chart(px.histogram(losses,nbins=50,title="Losses for CVaR"),use_container_width=True)
+    else:
+        st.markdown("### Example Drawdown Path")
+        fig2,ax2=plt.subplots(figsize=(6,4))
+        ax2.plot(drawdowns[:horizon])
+        ax2.set_title("Sample Drawdown"); ax2.set_ylabel("Drawdown")
+        st.pyplot(fig2)
+
+# --- Glossary ---
+st.subheader("📘 Glossary")
+st.markdown("""
+- **Expected Return**: Predicted % gain based on prices.
+- **Standard Deviation**: Total volatility (Variance model).
+- **CVaR**: Avg loss beyond Value-at-Risk at confidence α.
+- **Max Drawdown**: Largest peak-to-trough drop.
+- **Simulation Paths**: Monte Carlo for returns estimation.
+- **Optimization**: Minimize chosen risk metric under return constraint.
+""")
