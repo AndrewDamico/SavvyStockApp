@@ -2,14 +2,15 @@ import streamlit as st
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-import plotly.express as px
 import cvxpy as cp
+import yfinance as yf
+from sklearn.linear_model import LinearRegression
 
 st.set_page_config(page_title="Savvy Stock Portfolio Optimizer", layout="wide")
 st.title("📈 Savvy Stock Portfolio Optimizer")
 
 st.sidebar.header("Data Profile")
-profile = st.sidebar.radio("Choose Stock Data Profile", ["Original (Case-Based)", "Exploratory (Broader Risk Spread)", "Use My Own Data"])
+profile = st.sidebar.radio("Choose Stock Data Profile", ["Original (Case-Based)", "Exploratory (Broader Risk Spread)", "Use My Own Data (Live Prediction)"])
 
 if profile == "Original (Case-Based)":
     stock_data = {
@@ -30,12 +31,44 @@ elif profile == "Exploratory (Broader Risk Spread)":
     editable = False
     add_rows = False
 else:
-    stock_data = {
-        "Stock": ["AAPL", "MSFT", "GOOG"],
-        "Start Price": [180, 320, 2900],
-        "Expected Price": [200, 350, 3100],
-        "Variance": [0.04, 0.06, 0.07],
-    }
+    ticker_input = st.text_input("Enter stock tickers (comma-separated)", value="AAPL, MSFT, GOOG")
+    tickers = [x.strip().upper() for x in ticker_input.split(",") if x.strip()]
+    fetched_data = []
+
+    if st.button("🔍 Fetch Live Data and Predict Future Price"):
+        prediction_days = 21
+        for ticker in tickers:
+            try:
+                data = yf.Ticker(ticker).history(period="6mo")
+                closes = data["Close"]
+                if len(closes) < 30:
+                    continue
+                X = np.arange(len(closes)).reshape(-1, 1)
+                y = closes.values
+                model = LinearRegression().fit(X, y)
+                future_day = np.array([[len(closes) + prediction_days]])
+                predicted_price = model.predict(future_day)[0]
+                start_price = closes.iloc[-2]
+                variance = closes.pct_change().var()
+                fetched_data.append((ticker, round(start_price, 2), round(predicted_price, 2), round(variance, 6)))
+            except Exception as e:
+                st.warning(f"Error fetching/predicting for {ticker}: {e}")
+        if fetched_data:
+            stock_data = {
+                "Stock": [t[0] for t in fetched_data],
+                "Start Price": [t[1] for t in fetched_data],
+                "Expected Price": [t[2] for t in fetched_data],
+                "Variance": [t[3] for t in fetched_data],
+            }
+        else:
+            stock_data = {"Stock": [], "Start Price": [], "Expected Price": [], "Variance": []}
+    else:
+        stock_data = {
+            "Stock": ["AAPL", "MSFT", "GOOG"],
+            "Start Price": [180, 320, 2900],
+            "Expected Price": [200, 350, 3100],
+            "Variance": [0.04, 0.06, 0.07],
+        }
     editable = True
     add_rows = True
 
@@ -72,10 +105,8 @@ min_return = st.sidebar.slider("Minimum Expected Return", 0.05, 0.60, 0.10, 0.01
 max_alloc_toggle = st.sidebar.checkbox("Enable Max Allocation Constraint?", value=True)
 max_alloc_value = st.sidebar.slider("Max Allocation Per Stock (%)", 10, 100, 100, 5) / 100 if max_alloc_toggle else None
 highlight_mvp = st.sidebar.checkbox("Highlight Minimum Variance Portfolio", value=True)
-solver = st.sidebar.selectbox("Solver", options=["ECOS", "SCS", "OSQP"])
-download_plotly = st.sidebar.checkbox("Enable Interactive Plotly Chart")
 
-# Optimization
+solver = st.sidebar.selectbox("Solver", options=["ECOS", "SCS", "OSQP"])
 target_returns = np.linspace(0.05, 0.60, 200)
 risks, solutions, failed_targets = [], [], []
 
@@ -107,7 +138,6 @@ df["Expected Return"] = target_returns
 df["Risk (Std Dev)"] = risks
 df_valid = df.dropna()
 
-# Optimal Portfolio
 if not df_valid.empty and not df_valid[df_valid["Expected Return"] >= min_return].empty:
     selected_row = df_valid[df_valid["Expected Return"] >= min_return].iloc[0]
     st.subheader("📌 Optimal Portfolio at Minimum Return Target")
@@ -117,7 +147,7 @@ if not df_valid.empty and not df_valid[df_valid["Expected Return"] >= min_return
 else:
     st.warning("⚠️ No feasible portfolio found. Try reducing the target return or increasing max allocation.")
 
-# Side-by-side plots
+# Side-by-side charts
 st.subheader("📊 Portfolio Analysis")
 col1, col2 = st.columns(2)
 
@@ -150,7 +180,7 @@ with col2:
 # Glossary
 st.subheader("📘 Glossary of Terms")
 st.markdown("""
-- **Expected Return**: Projected gain based on stock price targets.
+- **Expected Return**: Projected gain based on a forecasted price 21 trading days in the future.
 - **Risk (Standard Deviation)**: The volatility of the portfolio's return.
 - **Efficient Frontier**: A curve showing optimal portfolios for each risk level.
 - **Minimum Variance Portfolio**: The portfolio with the lowest risk.
