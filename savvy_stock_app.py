@@ -2,6 +2,8 @@ import streamlit as st
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+import plotly.express as px
+import plotly.graph_objs as go
 import cvxpy as cp
 
 st.set_page_config(page_title="Savvy Stock Portfolio Optimizer", layout="wide")
@@ -25,15 +27,13 @@ stock_df["Start Price"] = pd.to_numeric(stock_df["Start Price"], errors="coerce"
 stock_df["Expected Price"] = pd.to_numeric(stock_df["Expected Price"], errors="coerce")
 stock_df["Variance"] = pd.to_numeric(stock_df["Variance"], errors="coerce")
 
-# Drop any invalid rows
+# Drop invalid rows
 invalid_rows = stock_df[stock_df.isnull().any(axis=1)]
 stock_df = stock_df.dropna()
 
-# Calculate expected returns
 expected_returns = ((stock_df["Expected Price"] - stock_df["Start Price"]) / stock_df["Start Price"]).to_numpy(dtype=np.float64)
 asset_names = stock_df["Stock"].tolist()
 
-# Covariance matrix
 base_corr = np.array([
     [1, 0.1, 0.8, -0.9, -0.8, 0.4],
     [0.1, 1, -0.7, -0.5, 0.2, 0],
@@ -60,8 +60,9 @@ max_alloc_toggle = st.sidebar.checkbox("Enable Max Allocation Constraint?", valu
 max_alloc_value = st.sidebar.slider("Max Allocation Per Stock (%)", 10, 100, 100, 5) / 100 if max_alloc_toggle else None
 highlight_mvp = st.sidebar.checkbox("Highlight Minimum Variance Portfolio", value=True)
 solver = st.sidebar.selectbox("Solver", options=["ECOS", "SCS", "OSQP"])
+download_plotly = st.sidebar.checkbox("Enable Plotly Hover Chart")
 
-# Efficient frontier setup
+# Efficient frontier
 target_returns = np.linspace(0.05, 0.60, 200)
 risks, solutions, failed_targets = [], [], []
 
@@ -110,30 +111,48 @@ col1, col2 = st.columns(2)
 
 with col1:
     st.markdown("### 📉 Efficient Frontier")
-    fig2, ax2 = plt.subplots(figsize=(6, 5))
+    fig2, ax2 = plt.subplots(figsize=(8, 6))
     ax2.plot(df["Risk (Std Dev)"], df["Expected Return"], label="Efficient Frontier", color="blue")
+
     if highlight_mvp and not df_valid.empty:
         min_risk_idx = df_valid["Risk (Std Dev)"].idxmin()
         min_point = df_valid.loc[min_risk_idx]
-        ax2.scatter(min_point["Risk (Std Dev)"], min_point["Expected Return"], color='red', zorder=5)
-        ax2.annotate("Min Variance Portfolio", xy=(min_point["Risk (Std Dev)"], min_point["Expected Return"]),
-                     xytext=(min_point["Risk (Std Dev)"] + 0.01, min_point["Expected Return"]),
+        label_x = min_point["Risk (Std Dev)"]
+        label_y = min_point["Expected Return"]
+        ax2.scatter(label_x, label_y, color='red', zorder=5)
+        offset = 0.005 if label_x < 0.3 else -0.05
+        ax2.annotate("Min Variance Portfolio", xy=(label_x, label_y),
+                     xytext=(label_x + offset, label_y),
                      arrowprops=dict(facecolor='red', arrowstyle="->"))
+
     ax2.set_xlabel("Risk (Std Dev)")
     ax2.set_ylabel("Expected Return")
     ax2.grid(True)
+    ax2.set_title("Efficient Frontier")
+    ax2.legend()
+    plt.tight_layout()
     st.pyplot(fig2)
 
 with col2:
     st.markdown("### 🧮 Asset Weights vs Return Target")
-    fig, ax = plt.subplots(figsize=(6, 5))
+    fig, ax = plt.subplots(figsize=(8, 6))
     for col in asset_names:
         ax.plot(df["Expected Return"], df[col], label=col)
     ax.set_xlabel("Expected Return")
     ax.set_ylabel("Portfolio Weight")
     ax.grid(True)
     ax.legend()
+    ax.set_title("Asset Weights by Return")
+    plt.tight_layout()
     st.pyplot(fig)
+
+# Plotly option
+if download_plotly and not df_valid.empty:
+    st.subheader("📊 Interactive Plotly Hover Chart")
+    fig_hover = px.scatter(df_valid, x="Risk (Std Dev)", y="Expected Return",
+                           title="Interactive Efficient Frontier",
+                           hover_data=asset_names)
+    st.plotly_chart(fig_hover, use_container_width=True)
 
 # Diagnostics
 st.subheader("📋 Diagnostics")
