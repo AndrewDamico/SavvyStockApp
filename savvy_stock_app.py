@@ -3,13 +3,12 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import plotly.express as px
-import plotly.graph_objs as go
 import cvxpy as cp
 
 st.set_page_config(page_title="Savvy Stock Portfolio Optimizer", layout="wide")
 st.title("📈 Savvy Stock Selection: Portfolio Optimizer")
 
-st.markdown("Edit the stock parameters below to run custom portfolio scenarios:")
+st.markdown("Edit the stock parameters below to run custom portfolio scenarios. This app helps you explore the efficient frontier and understand portfolio balancing tradeoffs.")
 
 # Initial stock data
 initial_data = pd.DataFrame({
@@ -19,21 +18,20 @@ initial_data = pd.DataFrame({
     "Variance": [0.032, 0.1, 0.333, 0.125, 0.065, 0.08],
 })
 
-# Editable table
 stock_df = st.data_editor(initial_data, num_rows="fixed", use_container_width=True)
 
-# Enforce numeric types
+# Type-safe parsing
 stock_df["Start Price"] = pd.to_numeric(stock_df["Start Price"], errors="coerce")
 stock_df["Expected Price"] = pd.to_numeric(stock_df["Expected Price"], errors="coerce")
 stock_df["Variance"] = pd.to_numeric(stock_df["Variance"], errors="coerce")
 
-# Drop invalid rows
 invalid_rows = stock_df[stock_df.isnull().any(axis=1)]
 stock_df = stock_df.dropna()
 
 expected_returns = ((stock_df["Expected Price"] - stock_df["Start Price"]) / stock_df["Start Price"]).to_numpy(dtype=np.float64)
 asset_names = stock_df["Stock"].tolist()
 
+# Build covariance matrix
 base_corr = np.array([
     [1, 0.1, 0.8, -0.9, -0.8, 0.4],
     [0.1, 1, -0.7, -0.5, 0.2, 0],
@@ -59,10 +57,10 @@ min_return = st.sidebar.slider("Minimum Expected Return", 0.05, 0.60, 0.10, 0.01
 max_alloc_toggle = st.sidebar.checkbox("Enable Max Allocation Constraint?", value=True)
 max_alloc_value = st.sidebar.slider("Max Allocation Per Stock (%)", 10, 100, 100, 5) / 100 if max_alloc_toggle else None
 highlight_mvp = st.sidebar.checkbox("Highlight Minimum Variance Portfolio", value=True)
-solver = st.sidebar.selectbox("Solver", options=["ECOS", "SCS", "OSQP"])
-download_plotly = st.sidebar.checkbox("Enable Plotly Hover Chart")
+solver = st.sidebar.selectbox("Solver (ECOS recommended)", options=["ECOS", "SCS", "OSQP"])
+download_plotly = st.sidebar.checkbox("Enable Interactive Plotly Chart")
 
-# Efficient frontier
+# Efficient frontier setup
 target_returns = np.linspace(0.05, 0.60, 200)
 risks, solutions, failed_targets = [], [], []
 
@@ -89,76 +87,79 @@ for target in target_returns:
         solutions.append([None] * n_assets)
         failed_targets.append(round(target, 4))
 
-# Output data
+# Portfolio results
 df = pd.DataFrame(solutions, columns=asset_names)
 df["Expected Return"] = target_returns
 df["Risk (Std Dev)"] = risks
 df_valid = df.dropna()
 
-# Display optimal portfolio
 if not df_valid.empty and not df_valid[df_valid["Expected Return"] >= min_return].empty:
     selected_row = df_valid[df_valid["Expected Return"] >= min_return].iloc[0]
-    st.subheader("Optimal Portfolio at Selected Minimum Return")
-    st.write("📌 Expected Return:", round(selected_row["Expected Return"], 3))
-    st.write("📉 Risk (Std Dev):", round(selected_row["Risk (Std Dev)"], 3))
+    st.subheader("📌 Optimal Portfolio at Minimum Return Target")
+    st.write("Expected Return:", round(selected_row["Expected Return"], 3))
+    st.write("Risk (Std Dev):", round(selected_row["Risk (Std Dev)"], 3))
     st.dataframe(selected_row[asset_names].T.rename("Weight (%)") * 100)
 else:
-    st.warning("⚠️ No feasible portfolio found. Try reducing the target return or increasing max allocation.")
+    st.warning("⚠️ No feasible portfolio found. Try reducing target return or increasing max allocation.")
 
 # Visualization
-st.subheader("📊 Visualization")
+st.subheader("📊 Visualizations")
 col1, col2 = st.columns(2)
 
 with col1:
-    st.markdown("### 📉 Efficient Frontier")
+    st.markdown("### Efficient Frontier")
     fig2, ax2 = plt.subplots(figsize=(8, 6))
     ax2.plot(df["Risk (Std Dev)"], df["Expected Return"], label="Efficient Frontier", color="blue")
-
     if highlight_mvp and not df_valid.empty:
         min_risk_idx = df_valid["Risk (Std Dev)"].idxmin()
         min_point = df_valid.loc[min_risk_idx]
-        label_x = min_point["Risk (Std Dev)"]
-        label_y = min_point["Expected Return"]
-        ax2.scatter(label_x, label_y, color='red', zorder=5)
-        offset = 0.005 if label_x < 0.3 else -0.05
-        ax2.annotate("Min Variance Portfolio", xy=(label_x, label_y),
-                     xytext=(label_x + offset, label_y),
-                     arrowprops=dict(facecolor='red', arrowstyle="->"))
-
+        ax2.scatter(min_point["Risk (Std Dev)"], min_point["Expected Return"],
+                    color='red', label="Min Variance Portfolio", zorder=5)
     ax2.set_xlabel("Risk (Std Dev)")
     ax2.set_ylabel("Expected Return")
+    ax2.legend()
     ax2.grid(True)
     ax2.set_title("Efficient Frontier")
-    ax2.legend()
-    plt.tight_layout()
     st.pyplot(fig2)
 
 with col2:
-    st.markdown("### 🧮 Asset Weights vs Return Target")
+    st.markdown("### Asset Weights by Return Target")
     fig, ax = plt.subplots(figsize=(8, 6))
     for col in asset_names:
         ax.plot(df["Expected Return"], df[col], label=col)
     ax.set_xlabel("Expected Return")
     ax.set_ylabel("Portfolio Weight")
-    ax.grid(True)
     ax.legend()
-    ax.set_title("Asset Weights by Return")
-    plt.tight_layout()
+    ax.grid(True)
+    ax.set_title("Asset Allocations")
     st.pyplot(fig)
 
-# Plotly option
 if download_plotly and not df_valid.empty:
-    st.subheader("📊 Interactive Plotly Hover Chart")
+    st.subheader("📈 Interactive Plotly Chart")
     fig_hover = px.scatter(df_valid, x="Risk (Std Dev)", y="Expected Return",
-                           title="Interactive Efficient Frontier",
+                           title="Efficient Frontier (Interactive)",
                            hover_data=asset_names)
     st.plotly_chart(fig_hover, use_container_width=True)
 
-# Diagnostics
-st.subheader("📋 Diagnostics")
+# Diagnostics and guidance
+st.subheader("📋 Solver Diagnostics & Guidance")
 if not invalid_rows.empty:
-    st.error(f"❌ Invalid rows removed from editable table (e.g. missing values):")
+    st.error("Invalid input rows were removed (e.g., missing price or variance).")
     st.dataframe(invalid_rows)
-st.info(f"✅ Feasible portfolios computed: {len(df_valid)} / {len(target_returns)}")
+
+st.info(f"Feasible portfolios found: {len(df_valid)} / {len(target_returns)}")
+
+if solver != "ECOS":
+    st.warning(f"Solver '{solver}' returned {len(df_valid)} feasible points. ECOS is usually more reliable.")
+
 if failed_targets:
-    st.warning(f"⚠️ Infeasible targets: {len(failed_targets)}. First few: {failed_targets[:5]}...")
+    st.caption(f"Some targets were infeasible. First few: {failed_targets[:5]}")
+
+st.markdown("---")
+st.markdown("**💡 Learning Tips:**")
+st.markdown("""
+- The Efficient Frontier shows the best return you can get for each level of risk.
+- The Minimum Variance Portfolio (MVP) has the least risk of any possible combination.
+- Use constraints to simulate real-world limits (e.g. no stock can exceed 20%).
+- Try adjusting expected returns or variances to explore different market conditions.
+""")
