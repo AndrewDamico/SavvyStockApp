@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 import cvxpy as cp
 import yfinance as yf
 from sklearn.linear_model import LinearRegression
+from datetime import datetime, timedelta
 
 st.set_page_config(page_title="Savvy Stock Portfolio Optimizer", layout="wide")
 st.title("📈 Savvy Stock Portfolio Optimizer")
@@ -21,6 +22,7 @@ if profile == "Original (Case-Based)":
     }
     editable = False
     add_rows = False
+
 elif profile == "Exploratory (Broader Risk Spread)":
     stock_data = {
         "Stock": ["X", "Y", "Z", "Alpha", "Beta", "Gamma"],
@@ -30,22 +32,34 @@ elif profile == "Exploratory (Broader Risk Spread)":
     }
     editable = False
     add_rows = False
+
 else:
     ticker_input = st.text_input("Enter stock tickers (comma-separated)", value="AAPL, MSFT, GOOG")
     tickers = [x.strip().upper() for x in ticker_input.split(",") if x.strip()]
-    st.write("Tickers to fetch:", tickers)
+
+    # Ensure persistent storage
+    if "stock_data_live" not in st.session_state:
+        st.session_state["stock_data_live"] = {
+            "Stock": ["AAPL", "MSFT", "GOOG"],
+            "Start Price": [180, 320, 2900],
+            "Expected Price": [200, 350, 3100],
+            "Variance": [0.04, 0.06, 0.07],
+        }
 
     fetched_data = []
     skipped = []
 
     if st.button("🔍 Fetch Live Data and Predict Future Price"):
         prediction_days = 21
+        end = datetime.today()
+        start = end - timedelta(days=180)
+
         for ticker in tickers:
             try:
-                data = yf.Ticker(ticker).history(period="6mo")
+                data = yf.download(ticker, start=start.strftime("%Y-%m-%d"), end=end.strftime("%Y-%m-%d"), interval="1d", progress=False)
                 closes = data["Close"]
                 if len(closes) < 30:
-                    skipped.append((ticker, "Not enough data"))
+                    skipped.append((ticker, "Not enough data (less than 30 rows)"))
                     continue
                 X = np.arange(len(closes)).reshape(-1, 1)
                 y = closes.values
@@ -58,30 +72,22 @@ else:
             except Exception as e:
                 skipped.append((ticker, str(e)))
 
-        st.write("✅ Fetched data:", fetched_data)
-        st.write("⚠️ Skipped tickers:", skipped)
-
         if fetched_data:
-            stock_data = {
+            st.session_state["stock_data_live"] = {
                 "Stock": [t[0] for t in fetched_data],
                 "Start Price": [t[1] for t in fetched_data],
                 "Expected Price": [t[2] for t in fetched_data],
                 "Variance": [t[3] for t in fetched_data],
             }
-        else:
-            st.warning("❌ No usable data fetched. Please check your tickers.")
-            stock_data = {"Stock": [], "Start Price": [], "Expected Price": [], "Variance": []}
-    else:
-        stock_data = {
-            "Stock": ["AAPL", "MSFT", "GOOG"],
-            "Start Price": [180, 320, 2900],
-            "Expected Price": [200, 350, 3100],
-            "Variance": [0.04, 0.06, 0.07],
-        }
 
+        st.write("✅ Fetched data:", fetched_data)
+        st.write("⚠️ Skipped tickers:", skipped)
+
+    stock_data = st.session_state["stock_data_live"]
     editable = True
     add_rows = True
 
+# === Shared logic from this point forward ===
 initial_data = pd.DataFrame(stock_data)
 st.subheader("Stock Parameters")
 stock_df = st.data_editor(initial_data, num_rows="dynamic" if add_rows else "fixed", use_container_width=True)
@@ -116,7 +122,7 @@ highlight_mvp = st.sidebar.checkbox("Highlight Minimum Variance Portfolio", valu
 solver = st.sidebar.selectbox("Solver", options=["ECOS", "SCS", "OSQP"])
 
 target_returns = np.linspace(0.05, 0.60, 200)
-risks, solutions, failed_targets = [], [], []
+risks, solutions = [], []
 
 x = cp.Variable(n_assets, name="weights")
 constraints = [cp.sum(x) == 1, x >= 0]
