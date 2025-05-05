@@ -50,9 +50,9 @@ risk_model = st.sidebar.selectbox("Select Risk Model for Optimization",
                                   ["Variance", "CVaR (approx)", "Max Drawdown (approx)"])
 st.sidebar.markdown("""
 **Risk Models Defined:**
-- **Variance**: Portfolio volatility.  
-- **CVaR**: Avg. loss beyond a worst-case percentile (requires simulation).  
-- **Max Drawdown**: Largest peak-to-trough drop (via simulated paths).
+- **Variance**: Portfolio volatility (standard deviation) measuring total risk.
+- **CVaR (Conditional Value at Risk)**: The average loss given that returns exceed the VaR threshold, focusing on tail risk.
+- **Max Drawdown**: The largest observed decline from a peak to a trough, showing worst-case historical drawdowns.
 """)
 num_sims = st.sidebar.number_input("Simulation Paths", 100, 10000, 1000, 100)
 horizon = st.sidebar.number_input("Simulation Horizon (days)", 30, 252, 126, 1)
@@ -81,8 +81,8 @@ N = len(names)
 x = cp.Variable(N)
 constraints = [cp.sum(x)==1, x>=0]
 returns_grid = np.linspace(mu.min(), mu.max(), 100)
-risks_mv = []
 weights_mv = []
+risks_mv = []
 for R in returns_grid:
     prob = cp.Problem(cp.Minimize(cp.quad_form(x, Sigma)), constraints + [mu @ x >= R])
     prob.solve(solver=cp.ECOS)
@@ -129,12 +129,11 @@ if risk_model != 'Variance':
 # --- Display results ---
 st.subheader(f"Optimal Portfolio (Min Return {min_return:.2f})")
 st.table(pd.DataFrame({'Weight': w_opt}, index=names))
-
 st.markdown('**Risk Metric:**')
 if risk_model == 'Variance':
     st.write(f"Std Dev: {opt['Risk']:.4f}")
 elif 'CVaR' in risk_model:
-    st.write(f"CVaR @{int(alpha*100)}%: {CVaR_val:.4f}")
+    st.write(f"CVaR @ {int(alpha*100)}%: {CVaR_val:.4f}")
 else:
     st.write(f"Avg Max Drawdown: {avg_dd:.4f}")
 
@@ -157,32 +156,51 @@ with row1_col2:
     ax_wt.legend()
     st.pyplot(fig_wt)
 
-# --- Second Row: Return/Simulation Plots ---
+# --- Second Row: Return & Loss/Drawdown ---
 row2_col1, row2_col2 = st.columns(2)
 with row2_col1:
     st.markdown('### Return Distribution (Sample)')
+    st.markdown('''This histogram displays the distribution of simulated terminal portfolio returns after the specified horizon. Each bar represents the frequency of ending returns, where a wider spread indicates higher overall volatility, skewness shows bias to gains or losses, and tails reveal extreme outcomes.''')
     if risk_model == 'Variance':
         st.write('Switch to CVaR or Drawdown to view simulations.')
     else:
-        st.plotly_chart(px.histogram(term_rets if risk_model != 'Variance' else (df_valid['Return']-df_valid['Return'].mean()),
-                                     nbins=50, title='Terminal Return Distribution'), use_container_width=True)
+        st.plotly_chart(px.histogram(term_rets, nbins=50, title='Terminal Return Distribution'), use_container_width=True)
 with row2_col2:
     if risk_model == 'Variance':
         st.write('')
     elif 'CVaR' in risk_model:
         st.markdown('### Loss Distribution for CVaR')
+        st.markdown('''The loss distribution plots negative terminal returns, focusing on the downside. It highlights the tail of worst-case losses, which is used to compute CVaR (average loss beyond the VaR threshold).''')
         st.plotly_chart(px.histogram(losses, nbins=50, title='Loss Distribution'), use_container_width=True)
     else:
         st.markdown('### Drawdown Distribution')
+        st.markdown('''This chart shows the distribution of maximum drawdowns across simulated paths. Drawdown measures the largest peak-to-trough decline during the period, indicating potential worst-case drawdown risk.''')
         st.plotly_chart(px.histogram(drawdowns, nbins=50, title='Drawdown Distribution'), use_container_width=True)
 
-# --- Glossary ---
+# --- Glossary of Terms ---
 st.subheader('📘 Glossary of Terms')
 st.markdown("""
-- **Expected Return**: Predicted percentage gain.
-- **Standard Deviation (Variance)**: Total volatility measure.
-- **CVaR**: Conditional Value at Risk; average of worst losses.
-- **Max Drawdown**: Largest peak-to-trough loss in simulated paths.
-- **Simulation Paths**: Number of Monte Carlo scenarios.
-- **Optimization**: Minimize chosen risk under return constraint.
-""" )
+**Expected Return**: The anticipated percentage gain or loss, calculated as (Expected Price - Start Price) / Start Price.
+
+**Standard Deviation (Variance)**: A measure of total volatility, indicating how much returns deviate from the mean.
+
+**CVaR (Conditional Value at Risk)**: The average loss beyond a specified VaR percentile (e.g., 95%), capturing tail risk.
+
+**Value at Risk (VaR)**: The loss threshold not expected to be exceeded at a given confidence level.
+
+**Max Drawdown**: The largest observed decline from a previous peak, showing potential worst-case portfolio downturn.
+
+**Simulation Paths**: Number of Monte Carlo scenarios generated to estimate distributions of returns, losses, and drawdowns.
+
+**Optimization**: Process of selecting portfolio weights to minimize selected risk metric while meeting a minimum return constraint.
+
+**Efficient Frontier**: The set of portfolios offering the highest return for each level of risk, or equivalently the lowest risk for each level of return.
+
+**Portfolio Weights**: The proportion of capital allocated to each asset in the portfolio.
+
+**Terminal Return**: The compounded return of the portfolio over the simulation horizon.
+
+**Drawdown Path**: Sequence of drawdown values over time showing the depth and duration of declines.
+
+"""
+)
