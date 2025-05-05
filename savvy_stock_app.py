@@ -33,7 +33,10 @@ elif profile == "Exploratory (Broader Risk Spread)":
 else:
     ticker_input = st.text_input("Enter stock tickers (comma-separated)", value="AAPL, MSFT, GOOG")
     tickers = [x.strip().upper() for x in ticker_input.split(",") if x.strip()]
+    st.write("Tickers to fetch:", tickers)
+
     fetched_data = []
+    skipped = []
 
     if st.button("🔍 Fetch Live Data and Predict Future Price"):
         prediction_days = 21
@@ -42,6 +45,7 @@ else:
                 data = yf.Ticker(ticker).history(period="6mo")
                 closes = data["Close"]
                 if len(closes) < 30:
+                    skipped.append((ticker, "Not enough data"))
                     continue
                 X = np.arange(len(closes)).reshape(-1, 1)
                 y = closes.values
@@ -52,7 +56,11 @@ else:
                 variance = closes.pct_change().var()
                 fetched_data.append((ticker, round(start_price, 2), round(predicted_price, 2), round(variance, 6)))
             except Exception as e:
-                st.warning(f"Error fetching/predicting for {ticker}: {e}")
+                skipped.append((ticker, str(e)))
+
+        st.write("✅ Fetched data:", fetched_data)
+        st.write("⚠️ Skipped tickers:", skipped)
+
         if fetched_data:
             stock_data = {
                 "Stock": [t[0] for t in fetched_data],
@@ -61,6 +69,7 @@ else:
                 "Variance": [t[3] for t in fetched_data],
             }
         else:
+            st.warning("❌ No usable data fetched. Please check your tickers.")
             stock_data = {"Stock": [], "Start Price": [], "Expected Price": [], "Variance": []}
     else:
         stock_data = {
@@ -69,6 +78,7 @@ else:
             "Expected Price": [200, 350, 3100],
             "Variance": [0.04, 0.06, 0.07],
         }
+
     editable = True
     add_rows = True
 
@@ -84,7 +94,6 @@ stock_df["Variance"] = pd.to_numeric(stock_df["Variance"], errors="coerce")
 expected_returns = ((stock_df["Expected Price"] - stock_df["Start Price"]) / stock_df["Start Price"]).to_numpy()
 asset_names = stock_df["Stock"].tolist()
 
-# Safety check
 if len(stock_df) == 0 or len(expected_returns) == 0:
     st.error("❌ No valid stock data available. Please add rows or check your inputs.")
     st.stop()
@@ -99,14 +108,13 @@ eigvals = np.linalg.eigvalsh(cov_matrix)
 if np.any(eigvals < 0):
     cov_matrix += np.eye(n_assets) * (abs(min(eigvals)) + 1e-5)
 
-# Sidebar Controls
 st.sidebar.header("Optimization Controls")
 min_return = st.sidebar.slider("Minimum Expected Return", 0.05, 0.60, 0.10, 0.01)
 max_alloc_toggle = st.sidebar.checkbox("Enable Max Allocation Constraint?", value=True)
 max_alloc_value = st.sidebar.slider("Max Allocation Per Stock (%)", 10, 100, 100, 5) / 100 if max_alloc_toggle else None
 highlight_mvp = st.sidebar.checkbox("Highlight Minimum Variance Portfolio", value=True)
-
 solver = st.sidebar.selectbox("Solver", options=["ECOS", "SCS", "OSQP"])
+
 target_returns = np.linspace(0.05, 0.60, 200)
 risks, solutions, failed_targets = [], [], []
 
@@ -127,11 +135,9 @@ for target in target_returns:
         else:
             risks.append(None)
             solutions.append([None] * n_assets)
-            failed_targets.append(round(target, 4))
     except Exception:
         risks.append(None)
         solutions.append([None] * n_assets)
-        failed_targets.append(round(target, 4))
 
 df = pd.DataFrame(solutions, columns=asset_names)
 df["Expected Return"] = target_returns
@@ -176,16 +182,3 @@ with col2:
     ax_weights.grid(True)
     ax_weights.legend()
     st.pyplot(fig_weights)
-
-# Glossary
-st.subheader("📘 Glossary of Terms")
-st.markdown("""
-- **Expected Return**: Projected gain based on a forecasted price 21 trading days in the future.
-- **Risk (Standard Deviation)**: The volatility of the portfolio's return.
-- **Efficient Frontier**: A curve showing optimal portfolios for each risk level.
-- **Minimum Variance Portfolio**: The portfolio with the lowest risk.
-- **Solver**: Mathematical engine used to optimize weights.
-- **Max Allocation Constraint**: Limits how much capital can go into one stock.
-- **Covariance Matrix**: Encodes how returns of assets move together.
-- **Portfolio Weights**: Proportional investment in each asset.
-""")
