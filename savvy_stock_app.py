@@ -4,7 +4,6 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import plotly.express as px
 import cvxpy as cp
-import yfinance as yf
 
 st.set_page_config(page_title="Savvy Stock Portfolio Optimizer", layout="wide")
 st.title("📈 Savvy Stock Portfolio Optimizer")
@@ -31,38 +30,12 @@ elif profile == "Exploratory (Broader Risk Spread)":
     editable = False
     add_rows = False
 else:
-    ticker_input = st.text_input("Enter stock tickers (comma-separated)", value="AAPL, MSFT, GOOG")
-    tickers = [x.strip().upper() for x in ticker_input.split(",") if x.strip()]
-    fetched_data = []
-
-    if st.button("🔍 Fetch Real Stock Data"):
-        for ticker in tickers:
-            try:
-                info = yf.Ticker(ticker).history(period="6mo")
-                if not info.empty:
-                    start_price = info["Close"][-2]
-                    expected_price = info["Close"][-1]
-                    variance = info["Close"].pct_change().var()
-                    fetched_data.append((ticker, round(start_price, 2), round(expected_price, 2), round(variance, 4)))
-            except Exception as e:
-                st.warning(f"Error fetching data for {ticker}: {e}")
-        if fetched_data:
-            stock_data = {
-                "Stock": [t[0] for t in fetched_data],
-                "Start Price": [t[1] for t in fetched_data],
-                "Expected Price": [t[2] for t in fetched_data],
-                "Variance": [t[3] for t in fetched_data],
-            }
-        else:
-            stock_data = {"Stock": [], "Start Price": [], "Expected Price": [], "Variance": []}
-    else:
-        stock_data = {
-            "Stock": ["AAPL", "MSFT", "GOOG"],
-            "Start Price": [180, 320, 2900],
-            "Expected Price": [200, 350, 3100],
-            "Variance": [0.04, 0.06, 0.07],
-        }
-
+    stock_data = {
+        "Stock": ["AAPL", "MSFT", "GOOG"],
+        "Start Price": [180, 320, 2900],
+        "Expected Price": [200, 350, 3100],
+        "Variance": [0.04, 0.06, 0.07],
+    }
     editable = True
     add_rows = True
 
@@ -78,7 +51,7 @@ stock_df["Variance"] = pd.to_numeric(stock_df["Variance"], errors="coerce")
 expected_returns = ((stock_df["Expected Price"] - stock_df["Start Price"]) / stock_df["Start Price"]).to_numpy()
 asset_names = stock_df["Stock"].tolist()
 
-# ⛔️ Early exit if no valid data
+# Safety check
 if len(stock_df) == 0 or len(expected_returns) == 0:
     st.error("❌ No valid stock data available. Please add rows or check your inputs.")
     st.stop()
@@ -144,31 +117,35 @@ if not df_valid.empty and not df_valid[df_valid["Expected Return"] >= min_return
 else:
     st.warning("⚠️ No feasible portfolio found. Try reducing the target return or increasing max allocation.")
 
-# Efficient Frontier
-st.subheader("📊 Efficient Frontier")
-fig2, ax2 = plt.subplots(figsize=(8, 6))
-ax2.plot(df["Risk (Std Dev)"], df["Expected Return"], label="Efficient Frontier", color="blue")
-if highlight_mvp and not df_valid.empty:
-    min_risk_idx = df_valid["Risk (Std Dev)"].idxmin()
-    min_point = df_valid.loc[min_risk_idx]
-    ax2.scatter(min_point["Risk (Std Dev)"], min_point["Expected Return"], color='red', label="Min Variance Portfolio", zorder=5)
-ax2.set_xlabel("Risk (Std Dev)")
-ax2.set_ylabel("Expected Return")
-ax2.grid(True)
-ax2.legend()
-st.pyplot(fig2)
+# Side-by-side plots
+st.subheader("📊 Portfolio Analysis")
+col1, col2 = st.columns(2)
 
-# Weights Chart
-st.subheader("📊 Asset Weights by Return Target")
-fig_weights, ax_weights = plt.subplots(figsize=(8, 6))
-for col in asset_names:
-    ax_weights.plot(df["Expected Return"], df[col], label=col)
-ax_weights.set_xlabel("Expected Return")
-ax_weights.set_ylabel("Portfolio Weight")
-ax_weights.set_title("Allocation Weights Across Efficient Frontier")
-ax_weights.grid(True)
-ax_weights.legend()
-st.pyplot(fig_weights)
+with col1:
+    st.markdown("### Efficient Frontier")
+    fig2, ax2 = plt.subplots(figsize=(8, 6))
+    ax2.plot(df["Risk (Std Dev)"], df["Expected Return"], label="Efficient Frontier", color="blue")
+    if highlight_mvp and not df_valid.empty:
+        min_risk_idx = df_valid["Risk (Std Dev)"].idxmin()
+        min_point = df_valid.loc[min_risk_idx]
+        ax2.scatter(min_point["Risk (Std Dev)"], min_point["Expected Return"], color='red', label="Min Variance Portfolio", zorder=5)
+    ax2.set_xlabel("Risk (Std Dev)")
+    ax2.set_ylabel("Expected Return")
+    ax2.grid(True)
+    ax2.legend()
+    st.pyplot(fig2)
+
+with col2:
+    st.markdown("### Asset Weights by Return Target")
+    fig_weights, ax_weights = plt.subplots(figsize=(8, 6))
+    for col in asset_names:
+        ax_weights.plot(df["Expected Return"], df[col], label=col)
+    ax_weights.set_xlabel("Expected Return")
+    ax_weights.set_ylabel("Portfolio Weight")
+    ax_weights.set_title("Allocation Weights Across Frontier")
+    ax_weights.grid(True)
+    ax_weights.legend()
+    st.pyplot(fig_weights)
 
 # Glossary
 st.subheader("📘 Glossary of Terms")
