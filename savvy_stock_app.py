@@ -78,7 +78,12 @@ stock_df["Variance"] = pd.to_numeric(stock_df["Variance"], errors="coerce")
 expected_returns = ((stock_df["Expected Price"] - stock_df["Start Price"]) / stock_df["Start Price"]).to_numpy()
 asset_names = stock_df["Stock"].tolist()
 
-base_corr = np.identity(len(asset_names))  # default to identity for custom data
+# ⛔️ Early exit if no valid data
+if len(stock_df) == 0 or len(expected_returns) == 0:
+    st.error("❌ No valid stock data available. Please add rows or check your inputs.")
+    st.stop()
+
+base_corr = np.identity(len(asset_names))
 n_assets = len(expected_returns)
 variances = stock_df["Variance"].to_numpy()
 stds = np.sqrt(variances)
@@ -129,6 +134,7 @@ df["Expected Return"] = target_returns
 df["Risk (Std Dev)"] = risks
 df_valid = df.dropna()
 
+# Optimal Portfolio
 if not df_valid.empty and not df_valid[df_valid["Expected Return"] >= min_return].empty:
     selected_row = df_valid[df_valid["Expected Return"] >= min_return].iloc[0]
     st.subheader("📌 Optimal Portfolio at Minimum Return Target")
@@ -138,6 +144,7 @@ if not df_valid.empty and not df_valid[df_valid["Expected Return"] >= min_return
 else:
     st.warning("⚠️ No feasible portfolio found. Try reducing the target return or increasing max allocation.")
 
+# Efficient Frontier
 st.subheader("📊 Efficient Frontier")
 fig2, ax2 = plt.subplots(figsize=(8, 6))
 ax2.plot(df["Risk (Std Dev)"], df["Expected Return"], label="Efficient Frontier", color="blue")
@@ -150,6 +157,18 @@ ax2.set_ylabel("Expected Return")
 ax2.grid(True)
 ax2.legend()
 st.pyplot(fig2)
+
+# Weights Chart
+st.subheader("📊 Asset Weights by Return Target")
+fig_weights, ax_weights = plt.subplots(figsize=(8, 6))
+for col in asset_names:
+    ax_weights.plot(df["Expected Return"], df[col], label=col)
+ax_weights.set_xlabel("Expected Return")
+ax_weights.set_ylabel("Portfolio Weight")
+ax_weights.set_title("Allocation Weights Across Efficient Frontier")
+ax_weights.grid(True)
+ax_weights.legend()
+st.pyplot(fig_weights)
 
 # Glossary
 st.subheader("📘 Glossary of Terms")
