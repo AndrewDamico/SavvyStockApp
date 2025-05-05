@@ -138,35 +138,43 @@ elif 'CVaR' in risk_model:
 else:
     st.write(f"Avg Max Drawdown: {avg_dd:.4f}")
 
-# --- Plots ---
-col1, col2 = st.columns(2)
-with col1:
+# --- First Row: Frontier & Weights ---
+row1_col1, row1_col2 = st.columns(2)
+with row1_col1:
     st.markdown('### Efficient Frontier (Variance)')
     fig, ax = plt.subplots(figsize=(6,4))
     ax.plot(df_valid['Risk'], df_valid['Return'], label='Frontier')
     ax.scatter(opt['Risk'], opt['Return'], color='red', label='Selected')
     ax.set_xlabel('Risk (Std Dev)'); ax.set_ylabel('Return'); ax.legend()
     st.pyplot(fig)
-with col2:
+with row1_col2:
+    st.markdown('### Asset Weights by Return Target')
+    fig_wt, ax_wt = plt.subplots(figsize=(6,4))
+    for name in names:
+        ax_wt.plot(df_valid['Return'], df_valid[name], label=name)
+    ax_wt.set_xlabel('Expected Return'); ax_wt.set_ylabel('Weight')
+    ax_wt.set_title('Asset Allocation vs Return')
+    ax_wt.legend()
+    st.pyplot(fig_wt)
+
+# --- Second Row: Return/Simulation Plots ---
+row2_col1, row2_col2 = st.columns(2)
+with row2_col1:
+    st.markdown('### Return Distribution (Sample)')
     if risk_model == 'Variance':
-        st.markdown('### Return Distribution (Sample)')
         st.write('Switch to CVaR or Drawdown to view simulations.')
+    else:
+        st.plotly_chart(px.histogram(term_rets if risk_model != 'Variance' else (df_valid['Return']-df_valid['Return'].mean()),
+                                     nbins=50, title='Terminal Return Distribution'), use_container_width=True)
+with row2_col2:
+    if risk_model == 'Variance':
+        st.write('')
     elif 'CVaR' in risk_model:
         st.markdown('### Loss Distribution for CVaR')
         st.plotly_chart(px.histogram(losses, nbins=50, title='Loss Distribution'), use_container_width=True)
     else:
         st.markdown('### Drawdown Distribution')
         st.plotly_chart(px.histogram(drawdowns, nbins=50, title='Drawdown Distribution'), use_container_width=True)
-
-# --- Asset Weights by Return Target ---
-st.subheader('Asset Weights by Return Target')
-fig_wt, ax_wt = plt.subplots(figsize=(6,4))
-for name in names:
-    ax_wt.plot(df_valid['Return'], df_valid[name], label=name)
-ax_wt.set_xlabel('Expected Return'); ax_wt.set_ylabel('Weight')
-ax_wt.set_title('Asset Allocation vs Return')
-ax_wt.legend()
-st.pyplot(fig_wt)
 
 # --- Glossary ---
 st.subheader('📘 Glossary of Terms')
@@ -177,4 +185,4 @@ st.markdown("""
 - **Max Drawdown**: Largest peak-to-trough loss in simulated paths.
 - **Simulation Paths**: Number of Monte Carlo scenarios.
 - **Optimization**: Minimize chosen risk under return constraint.
-""")
+""" )
